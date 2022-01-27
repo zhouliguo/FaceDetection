@@ -72,11 +72,7 @@ void preprocessing(cv::Mat& image, float*& blob, std::vector<int64_t>& inputTens
     cv::split(floatImage, chw);
 }
 
-std::vector< Detection> postprocessing(const cv::Size& resizedImageShape,
-    const cv::Size& originalImageShape,
-    std::vector<Ort::Value>& outputTensors,
-    const float& confThreshold, const float& iouThreshold)
-{
+std::vector< Detection> postprocessing(const cv::Size& resizedImageShape, const cv::Size& originalImageShape, std::vector<Ort::Value>& outputTensors, const float& confThreshold, const float& iouThreshold){
     std::vector<cv::Rect> boxes;
     std::vector<float> confs;
     std::vector<int> classIds;
@@ -94,12 +90,10 @@ std::vector< Detection> postprocessing(const cv::Size& resizedImageShape,
     int elementsInBatch = (int)(outputShape[1] * outputShape[2]);
 
     // only for batch size = 1
-    for (auto it = output.begin(); it != output.begin() + elementsInBatch; it += outputShape[2])
-    {
+    for (auto it = output.begin(); it != output.begin() + elementsInBatch; it += outputShape[2]){
         float clsConf = it[4];
 
-        if (clsConf > confThreshold)
-        {
+        if (clsConf > confThreshold){
             int centerX = (int)(it[0]);
             int centerY = (int)(it[1]);
             int width = (int)(it[2]);
@@ -125,8 +119,7 @@ std::vector< Detection> postprocessing(const cv::Size& resizedImageShape,
 
     std::vector<Detection> detections;
 
-    for (int idx : indices)
-    {
+    for (int idx : indices){
         Detection det;
         det.box = cv::Rect(boxes[idx]);
         scaleCoords(resizedImageShape, det.box, originalImageShape);
@@ -157,12 +150,12 @@ int main() {
 	Ort::Session session{ nullptr };
 
     const bool& isGPU = true;
-    const std::wstring& modelPath = L"best.onnx";
+    const std::wstring& modelPath = L"D:/vs/FaceDetection/weights/weight_light.onnx";
     const std::string imagePath = "D:/WIDER_FACE/WIDER_train/images/0--Parade/0_Parade_marchingband_1_364.jpg";
 
     std::vector<const char*> inputNames;
     std::vector<const char*> outputNames;
-    bool isDynamicInputShape{};
+    bool isDynamicInputShape{ false };
     cv::Size2f inputImageShape;
     const cv::Size& inputSize = cv::Size(640, 480);
 
@@ -176,18 +169,15 @@ int main() {
     auto cudaAvailable = std::find(availableProviders.begin(), availableProviders.end(), "CUDAExecutionProvider");
     OrtCUDAProviderOptions cudaOption;
 
-    if (isGPU && (cudaAvailable == availableProviders.end()))
-    {
+    if (isGPU && (cudaAvailable == availableProviders.end())){
         std::cout << "GPU is not supported by your ONNXRuntime build. Fallback to CPU." << std::endl;
         std::cout << "Inference device: CPU" << std::endl;
     }
-    else if (isGPU && (cudaAvailable != availableProviders.end()))
-    {
+    else if (isGPU && (cudaAvailable != availableProviders.end())){
         std::cout << "Inference device: GPU" << std::endl;
         sessionOptions.AppendExecutionProvider_CUDA(cudaOption);
     }
-    else
-    {
+    else{
         std::cout << "Inference device: CPU" << std::endl;
     }
 
@@ -201,7 +191,7 @@ int main() {
 
     Ort::TypeInfo inputTypeInfo = session.GetInputTypeInfo(0);
     std::vector<int64_t> inputTensorShape = inputTypeInfo.GetTensorTypeAndShapeInfo().GetShape();
-    isDynamicInputShape = false;
+
     // checking if width and height are dynamic
     if (inputTensorShape[2] == -1 && inputTensorShape[3] == -1){
         std::cout << "Dynamic input shape" << std::endl;
@@ -243,10 +233,11 @@ int main() {
     std::vector<Detection> results = postprocessing(resizedShape, image.size(), outputTensors, confThreshold, iouThreshold);
 
     for (Detection result : results) {
-        cv::rectangle(image, result.box, cv::Scalar(0, 0, 255), 1, 1, 0);
-        cv::imshow("image", image);
-        cv::waitKey();
+        if (result.conf > 0.5){
+            cv::rectangle(image, result.box, cv::Scalar(0, 0, 255), 1, 1, 0);
+        }
     }
-
+    cv::imshow("image", image);
+    cv::waitKey();
 	return 0;
 }
