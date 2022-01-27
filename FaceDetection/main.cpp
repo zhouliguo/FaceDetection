@@ -1,8 +1,8 @@
-#include <iostream>
+﻿#include <iostream>
 #include <fstream>
 #include <onnxruntime_cxx_api.h>
 #include <opencv.hpp>
-
+#include <dnn.hpp>
 struct Detection
 {
     cv::Rect box;
@@ -29,47 +29,29 @@ void getBestClassInfo(std::vector<float>::iterator it, const int& numClasses,
 
 }
 
-void scaleCoords(const cv::Size& imageShape, cv::Rect& coords, const cv::Size& imageOriginalShape)
-{
-    float gain = std::min((float)imageShape.height / (float)imageOriginalShape.height,
-        (float)imageShape.width / (float)imageOriginalShape.width);
+std::vector<float> preprocessing(cv::Mat& image, std::vector<int64_t>& inputTensorShape){
+    int h = image.rows/32*32;
+    int w = image.cols/32*32;
 
-    int pad[2] = { (int)(((float)imageShape.width - (float)imageOriginalShape.width * gain) / 2.0f),
-                  (int)(((float)imageShape.height - (float)imageOriginalShape.height * gain) / 2.0f) };
+    inputTensorShape[0] = 1;
+    inputTensorShape[1] = 3;
+    inputTensorShape[2] = h;
+    inputTensorShape[3] = w;
 
-    coords.x = (int)std::round(((float)(coords.x - pad[0]) / gain));
-    coords.y = (int)std::round(((float)(coords.y - pad[1]) / gain));
+    cv::Mat resize_img;
+    cv::resize(image, resize_img, cv::Size(w, h));
 
-    coords.width = (int)std::round(((float)coords.width / gain));
-    coords.height = (int)std::round(((float)coords.height / gain));
-
-    // // clip coords, should be modified for width and height
-    // coords.x = utils::clip(coords.x, 0, imageOriginalShape.width);
-    // coords.y = utils::clip(coords.y, 0, imageOriginalShape.height);
-    // coords.width = utils::clip(coords.width, 0, imageOriginalShape.width);
-    // coords.height = utils::clip(coords.height, 0, imageOriginalShape.height);
-}
-
-void preprocessing(cv::Mat& image, float*& blob, std::vector<int64_t>& inputTensorShape)
-{
-    cv::Mat resizedImage, floatImage;
-    cv::resize(image, resizedImage, cv::Size(640, 480));
-    cv::cvtColor(resizedImage, resizedImage, cv::COLOR_BGR2RGB);
-
-    inputTensorShape[2] = resizedImage.rows;
-    inputTensorShape[3] = resizedImage.cols;
-
-    resizedImage.convertTo(floatImage, CV_32FC3, 1 / 255.0);
-    blob = new float[floatImage.cols * floatImage.rows * floatImage.channels()];
-    cv::Size floatImageSize{ floatImage.cols, floatImage.rows };
-
-    // hwc -> chw
-    std::vector<cv::Mat> chw(floatImage.channels());
-    for (int i = 0; i < floatImage.channels(); ++i)
-    {
-        chw[i] = cv::Mat(floatImageSize, CV_32FC1, blob + i * floatImageSize.width * floatImageSize.height);
+    resize_img.convertTo(resize_img, CV_32F, 1.0 / 255);  //divided by 255
+    
+    cv::Mat channels[3]; //借用来进行HWC->CHW
+    cv::split(resize_img, channels);
+    std::vector<float> inputTensorValues;
+    for (int i = 0; i < resize_img.channels(); i++){  // BGR2RGB, HWC->CHW
+        std::vector<float> data = std::vector<float>(channels[2 - i].reshape(1, resize_img.cols * resize_img.rows));
+        inputTensorValues.insert(inputTensorValues.end(), data.begin(), data.end());
     }
-    cv::split(floatImage, chw);
+
+    return inputTensorValues;
 }
 
 std::vector< Detection> postprocessing(const cv::Size& resizedImageShape, const cv::Size& originalImageShape, std::vector<Ort::Value>& outputTensors, const float& confThreshold, const float& iouThreshold){
@@ -94,10 +76,10 @@ std::vector< Detection> postprocessing(const cv::Size& resizedImageShape, const 
         float clsConf = it[4];
 
         if (clsConf > confThreshold){
-            int centerX = (int)(it[0]);
-            int centerY = (int)(it[1]);
-            int width = (int)(it[2]);
-            int height = (int)(it[3]);
+            int centerX = (int)(it[0] / resizedImageShape.width * originalImageShape.width);
+            int centerY = (int)(it[1] / resizedImageShape.height * originalImageShape.height);
+            int width = (int)(it[2] / resizedImageShape.width * originalImageShape.width);
+            int height = (int)(it[3] / resizedImageShape.height * originalImageShape.height);
             int left = centerX - width / 2;
             int top = centerY - height / 2;
 
@@ -122,7 +104,7 @@ std::vector< Detection> postprocessing(const cv::Size& resizedImageShape, const 
     for (int idx : indices){
         Detection det;
         det.box = cv::Rect(boxes[idx]);
-        scaleCoords(resizedImageShape, det.box, originalImageShape);
+        //scaleCoords(resizedImageShape, det.box, originalImageShape);
 
         det.conf = confs[idx];
         det.classId = classIds[idx];
@@ -130,18 +112,6 @@ std::vector< Detection> postprocessing(const cv::Size& resizedImageShape, const 
     }
 
     return detections;
-}
-
-size_t vectorProduct(const std::vector<int64_t>& vector)
-{
-    if (vector.empty())
-        return 0;
-
-    size_t product = 1;
-    for (const auto& element : vector)
-        product *= element;
-
-    return product;
 }
 
 int main() {
@@ -210,15 +180,11 @@ int main() {
     inputImageShape = cv::Size2f(inputSize);
 
     cv::Mat image = cv::imread(imagePath);
+    //cv::resize(image, image, cv::Size(1024, 704));
 
-    float* blob = nullptr;
-    //std::vector<int64_t> inputTensorShape{ 1, 3, -1, -1 };
-    inputTensorShape[0] = 1;
-    preprocessing(image, blob, inputTensorShape);
+    std::vector<float> inputTensorValues = preprocessing(image, inputTensorShape);
 
-    size_t inputTensorSize = vectorProduct(inputTensorShape);
-
-    std::vector<float> inputTensorValues(blob, blob + inputTensorSize);
+    size_t inputTensorSize = inputTensorShape[0] * inputTensorShape[1] * inputTensorShape[2] * inputTensorShape[3];
 
     std::vector<Ort::Value> inputTensors;
 
