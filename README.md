@@ -1,1 +1,1 @@
-# GRR FaceDetection using C++
+# GRR Face Detection using C++
