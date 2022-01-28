@@ -3,17 +3,16 @@
 #include <onnxruntime_cxx_api.h>
 #include <opencv.hpp>
 #include <dnn.hpp>
-struct Detection
-{
+#include <ctime>
+
+struct Detection{
     cv::Rect box;
     float conf{};
     int classId{};
 };
 
 
-void getBestClassInfo(std::vector<float>::iterator it, const int& numClasses,
-    float& bestConf, int& bestClassId)
-{
+void getBestClassInfo(std::vector<float>::iterator it, const int& numClasses, float& bestConf, int& bestClassId){
     // first 5 element are box and obj confidence
     bestClassId = 5;
     bestConf = 0;
@@ -121,7 +120,10 @@ int main() {
 
     const bool& isGPU = true;
     const std::wstring& modelPath = L"D:/vs/FaceDetection/weights/weight_light.onnx";
-    const std::string imagePath = "D:/WIDER_FACE/WIDER_train/images/0--Parade/0_Parade_marchingband_1_364.jpg";
+    //const std::string imagePath = "D:/WIDER_FACE/WIDER_train/images/0--Parade/0_Parade_marchingband_1_364.jpg";
+
+    std::string imagePath;
+    std::ifstream val_list("image_list_val.txt");
 
     std::vector<const char*> inputNames;
     std::vector<const char*> outputNames;
@@ -179,31 +181,35 @@ int main() {
 
     inputImageShape = cv::Size2f(inputSize);
 
-    cv::Mat image = cv::imread(imagePath);
-    //cv::resize(image, image, cv::Size(1024, 704));
+ 
+    for (int i = 0; i < 3226; i++) {
+        val_list >> imagePath;
+        cv::Mat image = cv::imread("D:/WIDER_FACE/WIDER_val/images/" + imagePath);
+        cv::resize(image, image, cv::Size(640, 480));
 
-    std::vector<float> inputTensorValues = preprocessing(image, inputTensorShape);
+        std::vector<float> inputTensorValues = preprocessing(image, inputTensorShape);
 
-    size_t inputTensorSize = inputTensorShape[0] * inputTensorShape[1] * inputTensorShape[2] * inputTensorShape[3];
+        size_t inputTensorSize = inputTensorShape[0] * inputTensorShape[1] * inputTensorShape[2] * inputTensorShape[3];
 
-    std::vector<Ort::Value> inputTensors;
+        std::vector<Ort::Value> inputTensors;
 
-    Ort::MemoryInfo memoryInfo = Ort::MemoryInfo::CreateCpu(OrtAllocatorType::OrtArenaAllocator, OrtMemType::OrtMemTypeDefault);
+        Ort::MemoryInfo memoryInfo = Ort::MemoryInfo::CreateCpu(OrtAllocatorType::OrtArenaAllocator, OrtMemType::OrtMemTypeDefault);
 
-    inputTensors.push_back(Ort::Value::CreateTensor<float>(memoryInfo, inputTensorValues.data(), inputTensorSize, inputTensorShape.data(), inputTensorShape.size()));
+        inputTensors.push_back(Ort::Value::CreateTensor<float>(memoryInfo, inputTensorValues.data(), inputTensorSize, inputTensorShape.data(), inputTensorShape.size()));
+        std::vector<Ort::Value> outputTensors = session.Run(Ort::RunOptions{ nullptr }, inputNames.data(), inputTensors.data(), 1, outputNames.data(), 1);
 
-    std::vector<Ort::Value> outputTensors = session.Run(Ort::RunOptions{ nullptr }, inputNames.data(), inputTensors.data(), 1, outputNames.data(), 1);
+        cv::Size resizedShape = cv::Size((int)inputTensorShape[3], (int)inputTensorShape[2]);
 
-    cv::Size resizedShape = cv::Size((int)inputTensorShape[3], (int)inputTensorShape[2]);
+        std::vector<Detection> results = postprocessing(resizedShape, image.size(), outputTensors, confThreshold, iouThreshold);
 
-    std::vector<Detection> results = postprocessing(resizedShape, image.size(), outputTensors, confThreshold, iouThreshold);
-
-    for (Detection result : results) {
-        if (result.conf > 0.5){
-            cv::rectangle(image, result.box, cv::Scalar(0, 0, 255), 1, 1, 0);
+        for (Detection result : results) {
+           if (result.conf > 0.5) {
+                cv::rectangle(image, result.box, cv::Scalar(0, 0, 255), 1, 1, 0);
+            }
         }
+        cv::imshow("image", image);
+        cv::waitKey();
     }
-    cv::imshow("image", image);
-    cv::waitKey();
+
 	return 0;
 }
