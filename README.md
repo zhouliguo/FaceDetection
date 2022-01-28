@@ -1,1 +1,1 @@
-# GRR FaceDetection using C++ and onnxruntime
+# GRR FaceDetection using C++
